@@ -1,5 +1,9 @@
 package com.cya544.greentea
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
@@ -7,6 +11,8 @@ import android.os.Bundle
 import android.os.Environment
 import android.widget.Toast
 import android.net.Uri
+import android.view.View
+import android.view.animation.DecelerateInterpolator
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 import androidx.activity.ComponentActivity
@@ -85,8 +91,11 @@ data class BloodPressureRecord(
 }
 
 class MainActivity : ComponentActivity() {
+    private var keepSplashOnScreen = true
+
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        val splashScreen = installSplashScreen()
+        splashScreen.setKeepOnScreenCondition { keepSplashOnScreen }
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
@@ -94,6 +103,40 @@ class MainActivity : ComponentActivity() {
                 BloodPressureApp()
             }
         }
+        splashScreen.setOnExitAnimationListener { splashScreenView ->
+            val iconView = splashScreenView.iconView
+            val translationDistance = -iconView.rootView.height * 0.3f
+
+            val floatUp = ObjectAnimator.ofFloat(
+                iconView,
+                View.TRANSLATION_Y,
+                0f,
+                translationDistance
+            ).apply {
+                duration = 600
+                interpolator = DecelerateInterpolator()
+            }
+
+            val scaleDown = ObjectAnimator.ofFloat(iconView, View.SCALE_X, 1f, 0.5f)
+            val scaleUp = ObjectAnimator.ofFloat(iconView, View.SCALE_Y, 1f, 0.5f)
+            val fadeOut = ObjectAnimator.ofFloat(iconView, View.ALPHA, 1f, 0f)
+
+            val phase2 = AnimatorSet().apply {
+                playTogether(scaleDown, scaleUp, fadeOut)
+                duration = 400
+            }
+
+            AnimatorSet().apply {
+                playSequentially(floatUp, phase2)
+                addListener(object : AnimatorListenerAdapter() {
+                    override fun onAnimationEnd(animation: Animator) {
+                        splashScreenView.remove()
+                    }
+                })
+                start()
+            }
+        }
+        keepSplashOnScreen = false
     }
 }
 
