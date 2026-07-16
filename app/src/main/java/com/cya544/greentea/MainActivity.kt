@@ -11,6 +11,10 @@ import android.os.Bundle
 import android.os.Environment
 import android.widget.Toast
 import android.net.Uri
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import android.view.View
 import android.view.animation.DecelerateInterpolator
 import java.util.zip.ZipEntry
@@ -663,11 +667,14 @@ private fun HistoryScreen(
 ) {
     var selectedDate by remember { mutableStateOf<Long?>(null) }
     var page by remember { mutableStateOf(0) }
+    var jumpInput by remember { mutableStateOf("") }
     val pager = rememberHistoryPagerState(records, selectedDate, page)
     var exportDialogVisible by remember { mutableStateOf(false) }
     var customExportVisible by remember { mutableStateOf(false) }
     var exportMessage by remember { mutableStateOf<String?>(null) }
     var importMessage by remember { mutableStateOf<String?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
     var customStartDate by remember { mutableStateOf<Long?>(null) }
     var customEndDate by remember { mutableStateOf<Long?>(null) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -693,34 +700,47 @@ private fun HistoryScreen(
         }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
-        Column(modifier = Modifier.weight(1f).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            HistoryHeader(
-                selectedDate = selectedDate,
-                onPickDate = { openDatePicker { selectedDate = it; page = 0 } },
-                onClearDate = { selectedDate = null; page = 0 }
-            )
-            HistoryActionsRow(
-                pageText = "第 ${pager.safePage + 1}/${pager.totalPages} 页  共 ${pager.filteredRecords.size} 条",
-                onImport = { launcher.launch(arrayOf("text/*", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel")) },
-                onOpenExport = { exportDialogVisible = true }
-            )
-            importMessage?.let { Text(it) }
-            exportMessage?.let { Text(it) }
-            HistoryRecordList(
-                records = pager.pageRecords,
-                onDelete = onDelete
+    Box(modifier = modifier.fillMaxSize()) {
+        SnackbarHost(hostState = snackbarHostState, modifier = Modifier.align(Alignment.BottomCenter))
+        Column(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.weight(1f).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                HistoryHeader(
+                    selectedDate = selectedDate,
+                    onPickDate = { openDatePicker { selectedDate = it; page = 0 } },
+                    onClearDate = { selectedDate = null; page = 0 }
+                )
+                HistoryActionsRow(
+                    pageText = "第 ${pager.safePage + 1}/${pager.totalPages} 页  共 ${pager.filteredRecords.size} 条",
+                    onImport = { launcher.launch(arrayOf("text/*", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel")) },
+                    onOpenExport = { exportDialogVisible = true }
+                )
+                importMessage?.let { Text(it) }
+                exportMessage?.let { Text(it) }
+                HistoryRecordList(
+                    records = pager.pageRecords,
+                    onDelete = onDelete
+                )
+            }
+
+            HistoryPagerBar(
+                page = pager.safePage,
+                totalPages = pager.totalPages,
+                onPageChange = { page = it },
+                jumpInput = jumpInput,
+                onJumpInputChange = { jumpInput = it.filter(Char::isDigit) },
+                onJumpToPage = { targetPage ->
+                    if (targetPage in 0 until pager.totalPages) {
+                        page = targetPage
+                        jumpInput = ""
+                    } else {
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("页码超出范围，请输入 1 到 ${pager.totalPages} 之间的数字")
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().padding(16.dp)
             )
         }
-
-        HistoryPagerBar(
-            page = pager.safePage,
-            totalPages = pager.totalPages,
-            onPageChange = { page = it },
-            jumpInput = pager.jumpInput,
-            onJumpInputChange = { pager.jumpInput = it },
-            modifier = Modifier.fillMaxWidth().padding(16.dp)
-        )
     }
 
     ExportOptionsDialog(
@@ -729,7 +749,9 @@ private fun HistoryScreen(
         onExportMonth = {
             val now = System.currentTimeMillis()
             val monthText = SimpleDateFormat("yyyy年MM月", Locale.getDefault()).format(Date(now))
-            val (start, end) = currentMonthRange(now)
+            val startEnd = currentMonthRange(now)
+            val start = startEnd.first
+            val end = startEnd.second
             val monthlyRecords = records.filter { it.timestamp in start..end }
             exportMessage = "已导出到 ${exportXlsx(context, monthlyRecords, "血压记录_${monthText}.xlsx").absolutePath}"
             exportDialogVisible = false
@@ -774,7 +796,6 @@ private data class HistoryPagerState(
     val safePage: Int,
     val totalPages: Int,
     val pageRecords: List<BloodPressureRecord>,
-    var jumpInput: String = "",
 )
 
 private fun currentMonthRange(now: Long): Pair<Long, Long> {
@@ -862,7 +883,7 @@ private fun HistoryRecordList(records: List<BloodPressureRecord>, onDelete: (Blo
 }
 
 @Composable
-private fun HistoryPagerBar(page: Int, totalPages: Int, onPageChange: (Int) -> Unit, jumpInput: String, onJumpInputChange: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun HistoryPagerBar(page: Int, totalPages: Int, onPageChange: (Int) -> Unit, jumpInput: String, onJumpInputChange: (String) -> Unit, onJumpToPage: (Int) -> Unit, modifier: Modifier = Modifier) {
     val maxJump = totalPages - 1
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
@@ -877,7 +898,7 @@ private fun HistoryPagerBar(page: Int, totalPages: Int, onPageChange: (Int) -> U
             OutlinedTextField(value = jumpInput, onValueChange = onJumpInputChange, modifier = Modifier.weight(1f), label = { Text("跳转页码") }, singleLine = true)
             Button(onClick = {
                 val target = jumpInput.toIntOrNull()?.minus(1) ?: return@Button
-                onPageChange(target.coerceIn(0, maxJump))
+                onJumpToPage(target)
             }) { Text("跳转") }
         }
     }
