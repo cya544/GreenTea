@@ -68,7 +68,7 @@ dependencies {
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.core.splashscreen)
     implementation(libs.material)
-    implementation(libs.poi)
+    implementation(libs.jxl)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
