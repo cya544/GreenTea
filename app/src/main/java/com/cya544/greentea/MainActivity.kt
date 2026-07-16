@@ -113,8 +113,8 @@ class MainActivity : ComponentActivity() {
                 0f,
                 translationDistance
             ).apply {
-                duration = 600
-                interpolator = DecelerateInterpolator()
+                duration = 850
+                interpolator = DecelerateInterpolator(1.6f)
             }
 
             val scaleDown = ObjectAnimator.ofFloat(iconView, View.SCALE_X, 1f, 0.5f)
@@ -476,7 +476,7 @@ private fun deleteRecord(context: Context, id: Long) {
 private enum class TabItem {
     SAVE,
     HISTORY,
-    TODO,
+    // TODO,
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -515,12 +515,6 @@ private fun BloodPressureApp() {
                     icon = { Text("≡") },
                     label = { Text("历史记录") }
                 )
-                NavigationBarItem(
-                    selected = selectedTab == TabItem.TODO,
-                    onClick = { selectedTab = TabItem.TODO },
-                    icon = { Text("•") },
-                    label = { Text("每日代办") }
-                )
             }
         }
     ) { innerPadding ->
@@ -540,7 +534,7 @@ private fun BloodPressureApp() {
                 },
                 onImported = { refresh() }
             )
-            TabItem.TODO -> TodoScreen(modifier = Modifier.padding(innerPadding))
+            // TabItem.TODO -> TodoScreen(modifier = Modifier.padding(innerPadding))
         }
     }
 
