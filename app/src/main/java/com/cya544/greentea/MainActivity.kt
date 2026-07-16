@@ -32,6 +32,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -63,6 +65,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -885,21 +888,42 @@ private fun HistoryRecordList(records: List<BloodPressureRecord>, onDelete: (Blo
 @Composable
 private fun HistoryPagerBar(page: Int, totalPages: Int, onPageChange: (Int) -> Unit, jumpInput: String, onJumpInputChange: (String) -> Unit, onJumpToPage: (Int) -> Unit, modifier: Modifier = Modifier) {
     val maxJump = totalPages - 1
+    val canGoPrev = page > 0
+    val canGoNext = page < maxJump
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-            Button(onClick = { onPageChange((page - 1).coerceAtLeast(0)) }, enabled = page > 0, modifier = Modifier.weight(1f)) { Text("上一页") }
-            Button(onClick = { onPageChange((page + 1).coerceAtMost(maxJump)) }, enabled = page < maxJump, modifier = Modifier.weight(1f)) { Text("下一页") }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            Button(onClick = { onPageChange(0) }, enabled = page != 0, modifier = Modifier.weight(1f)) { Text("首页") }
-            Button(onClick = { onPageChange(maxJump) }, enabled = page != maxJump, modifier = Modifier.weight(1f)) { Text("末页") }
-        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(value = jumpInput, onValueChange = onJumpInputChange, modifier = Modifier.weight(1f), label = { Text("跳转页码") }, singleLine = true)
-            Button(onClick = {
-                val target = jumpInput.toIntOrNull()?.minus(1) ?: return@Button
-                onJumpToPage(target)
-            }) { Text("跳转") }
+            Button(
+                onClick = { onPageChange(0) },
+                enabled = canGoPrev,
+                modifier = Modifier.weight(0.85f)
+            ) { Text("<<") }
+            Button(
+                onClick = { onPageChange((page - 1).coerceAtLeast(0)) },
+                enabled = canGoPrev,
+                modifier = Modifier.weight(0.85f)
+            ) { Text("<") }
+            OutlinedTextField(
+                value = jumpInput,
+                onValueChange = onJumpInputChange,
+                modifier = Modifier.weight(1.4f),
+                label = { Text("页码跳转") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = {
+                    val target = jumpInput.toIntOrNull()?.minus(1) ?: return@KeyboardActions
+                    onJumpToPage(target)
+                })
+            )
+            Button(
+                onClick = { onPageChange((page + 1).coerceAtMost(maxJump)) },
+                enabled = canGoNext,
+                modifier = Modifier.weight(0.85f)
+            ) { Text(">") }
+            Button(
+                onClick = { onPageChange(maxJump) },
+                enabled = canGoNext,
+                modifier = Modifier.weight(0.85f)
+            ) { Text(">>") }
         }
     }
 }
