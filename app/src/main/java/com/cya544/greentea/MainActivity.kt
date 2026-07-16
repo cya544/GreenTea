@@ -215,7 +215,7 @@ private fun saveRecords(context: Context, records: List<BloodPressureRecord>) {
 private fun sanitizeFileName(name: String): String = name.replace(Regex("[\\/:*?\"<>|]"), "_")
 
 private fun exportXlsx(context: Context, records: List<BloodPressureRecord>, fileName: String): File {
-    val downloads = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir
+    val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
     if (!downloads.exists()) downloads.mkdirs()
     val file = File(downloads, sanitizeFileName(fileName))
 
