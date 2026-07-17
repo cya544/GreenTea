@@ -663,6 +663,7 @@ private fun SaveScreen(
                     }, colors = greenButtonColors()) { Text("修改时间") }
                     Button(onClick = { selectedDateTime = System.currentTimeMillis() }, colors = blueButtonColors()) { Text("更新时间") }
                 }
+                Text("当前时间：${formatDateTime(selectedDateTime)}")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     Button(onClick = {
                         val tempDir = File(context.cacheDir, "camera").apply { mkdirs() }
