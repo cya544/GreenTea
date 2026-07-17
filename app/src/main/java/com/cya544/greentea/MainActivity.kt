@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -209,6 +210,13 @@ private fun loadRecords(context: Context): List<BloodPressureRecord> {
             }
         }.sortedByDescending { it.timestamp }
     }.getOrElse { emptyList() }
+}
+
+private fun formatSeconds(totalSeconds: Int): String {
+    val safe = totalSeconds.coerceAtLeast(0)
+    val minutes = safe / 60
+    val seconds = safe % 60
+    return if (minutes > 0) "%02d:%02d".format(minutes, seconds) else "00:%02d".format(seconds)
 }
 
 private fun saveRecords(context: Context, records: List<BloodPressureRecord>) {
@@ -474,6 +482,7 @@ private enum class TabItem {
     SAVE,
     HISTORY,
     TODO,
+    EXERCISE,
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -518,6 +527,12 @@ private fun BloodPressureApp() {
                     icon = { Text("•") },
                     label = { Text("每日代办") }
                 )
+                NavigationBarItem(
+                    selected = selectedTab == TabItem.EXERCISE,
+                    onClick = { selectedTab = TabItem.EXERCISE },
+                    icon = { Text("＋") },
+                    label = { Text("锻炼") }
+                )
             }
         }
     ) { innerPadding ->
@@ -538,6 +553,7 @@ private fun BloodPressureApp() {
                 onImported = { refresh() }
             )
             TabItem.TODO -> TodoScreen(modifier = Modifier.padding(innerPadding))
+            TabItem.EXERCISE -> ExerciseScreen(modifier = Modifier.padding(innerPadding))
         }
     }
 
@@ -1369,6 +1385,370 @@ private fun TodoScreen(modifier: Modifier = Modifier) {
             },
             dismissButton = { TextButton(onClick = { addDialogVisible = false }) { Text("取消") } }
         )
+    }
+}
+
+private data class ExerciseStep(
+    val name: String,
+    val durationSeconds: Int,
+    val restSeconds: Int = 60,
+)
+
+private data class ExercisePlan(
+    val id: Long,
+    val name: String,
+    val steps: List<ExerciseStep>,
+)
+
+private fun loadExercises(context: Context): List<ExercisePlan> {
+    val raw = context.getSharedPreferences("exercise_records", Context.MODE_PRIVATE)
+        .getString("exercises", "[]") ?: "[]"
+    return runCatching {
+        val array = JSONArray(raw)
+        buildList {
+            for (i in 0 until array.length()) {
+                val item = array.getJSONObject(i)
+                val stepsArray = item.optJSONArray("steps") ?: JSONArray()
+                val steps = buildList {
+                    for (j in 0 until stepsArray.length()) {
+                        val step = stepsArray.getJSONObject(j)
+                        add(
+                            ExerciseStep(
+                                name = step.optString("name", "步骤 ${j + 1}"),
+                                durationSeconds = step.optInt("durationSeconds", 60),
+                                restSeconds = step.optInt("restSeconds", 60)
+                            )
+                        )
+                    }
+                }
+                add(
+                    ExercisePlan(
+                        id = item.getLong("id"),
+                        name = item.getString("name"),
+                        steps = steps
+                    )
+                )
+            }
+        }
+    }.getOrElse { emptyList() }
+}
+
+private fun saveExercises(context: Context, exercises: List<ExercisePlan>) {
+    val array = JSONArray()
+    exercises.forEach { exercise ->
+        array.put(JSONObject().apply {
+            put("id", exercise.id)
+            put("name", exercise.name)
+            put("steps", JSONArray().apply {
+                exercise.steps.forEach { step ->
+                    put(JSONObject().apply {
+                        put("name", step.name)
+                        put("durationSeconds", step.durationSeconds)
+                        put("restSeconds", step.restSeconds)
+                    })
+                }
+            })
+        })
+    }
+    context.getSharedPreferences("exercise_records", Context.MODE_PRIVATE)
+        .edit()
+        .putString("exercises", array.toString())
+        .apply()
+}
+
+@Composable
+private fun ExerciseScreen(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    var exercises by remember { mutableStateOf(loadExercises(context)) }
+    var addDialogVisible by remember { mutableStateOf(false) }
+    var newExerciseName by remember { mutableStateOf("") }
+    var activeExercise by remember { mutableStateOf<ExercisePlan?>(null) }
+    var editingExercise by remember { mutableStateOf<ExercisePlan?>(null) }
+
+    fun refresh() { exercises = loadExercises(context) }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        if (activeExercise == null) {
+            Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("锻炼", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                if (exercises.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("暂无锻炼计划") }
+                } else {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                        items(exercises.chunked(2), key = { row -> row.first().id }) { row ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                                row.forEach { exercise ->
+                                    Card(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .aspectRatio(1f)
+                                    ) {
+                                        Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
+                                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                Text(exercise.name, fontWeight = FontWeight.Bold)
+                                                Text("共 ${exercise.steps.size} 步")
+                                            }
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                Button(onClick = { activeExercise = exercise }, modifier = Modifier.weight(1f), colors = blueButtonColors()) { Text("开始") }
+                                                Button(onClick = { editingExercise = exercise }, modifier = Modifier.weight(1f), colors = blueButtonColors()) { Text("编辑") }
+                                            }
+                                        }
+                                    }
+                                }
+                                if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                }
+            }
+
+            Button(
+                onClick = { addDialogVisible = true },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = 96.dp),
+                shape = RoundedCornerShape(999.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color(0xFF2FA66B), contentColor = androidx.compose.ui.graphics.Color.White)
+            ) { Text("＋") }
+        } else {
+            ExerciseRunScreen(
+                exercise = activeExercise!!,
+                onExit = { activeExercise = null },
+                onPause = { /* 暂停预留 */ }
+            )
+        }
+    }
+
+    if (addDialogVisible) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("新建锻炼") },
+            text = {
+                OutlinedTextField(
+                    value = newExerciseName,
+                    onValueChange = { newExerciseName = it },
+                    label = { Text("锻炼名字") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (newExerciseName.isBlank()) return@TextButton
+                    val exercise = ExercisePlan(id = System.currentTimeMillis(), name = newExerciseName.trim(), steps = listOf(ExerciseStep("第一步骤", 60, 60)))
+                    exercises = listOf(exercise) + exercises
+                    saveExercises(context, exercises)
+                    newExerciseName = ""
+                    addDialogVisible = false
+                    editingExercise = exercise
+                }) { Text("确定") }
+            },
+            dismissButton = { TextButton(onClick = { addDialogVisible = false }) { Text("取消") } }
+        )
+    }
+
+    editingExercise?.let { exercise ->
+        ExerciseStepEditorDialog(
+            exercise = exercise,
+            onDismiss = { editingExercise = null },
+            onSave = { updated ->
+                exercises = exercises.map { if (it.id == updated.id) updated else it }
+                saveExercises(context, exercises)
+                editingExercise = null
+                refresh()
+            }
+        )
+    }
+}
+
+@Composable
+private fun ExerciseStepEditorDialog(
+    exercise: ExercisePlan,
+    onDismiss: () -> Unit,
+    onSave: (ExercisePlan) -> Unit,
+) {
+    var stepIndex by remember { mutableStateOf(0) }
+    val steps = remember(exercise.steps) { exercise.steps.toMutableList().ifEmpty { mutableListOf(ExerciseStep("第一步骤", 60, 60)) } }
+    var stepName by remember { mutableStateOf(steps[0].name) }
+    var stepDuration by remember { mutableStateOf(steps[0].durationSeconds.toString()) }
+    var restDuration by remember { mutableStateOf(steps[0].restSeconds.toString()) }
+
+    fun persistCurrentStep() {
+        steps[stepIndex] = ExerciseStep(
+            stepName.ifBlank { "步骤 ${stepIndex + 1}" },
+            stepDuration.toIntOrNull() ?: 60,
+            restDuration.toIntOrNull() ?: 60
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = { },
+        title = { Text(exercise.name) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("步骤 ${stepIndex + 1}/${steps.size}")
+                OutlinedTextField(value = stepName, onValueChange = { stepName = it }, label = { Text("步骤名称") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = stepDuration, onValueChange = { stepDuration = it.filter(Char::isDigit) }, label = { Text("持续时间（秒）") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = restDuration, onValueChange = { restDuration = it.filter(Char::isDigit) }, label = { Text("休息时间（秒）") }, modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = {
+                    persistCurrentStep()
+                    if (stepIndex > 0) {
+                        stepIndex--
+                        stepName = steps[stepIndex].name
+                        stepDuration = steps[stepIndex].durationSeconds.toString()
+                        restDuration = steps[stepIndex].restSeconds.toString()
+                    }
+                }) { Text("上一步") }
+                TextButton(onClick = {
+                    persistCurrentStep()
+                    onSave(exercise.copy(steps = steps.toList()))
+                }) { Text("保存") }
+                TextButton(onClick = {
+                    persistCurrentStep()
+                    if (stepIndex < steps.lastIndex) {
+                        stepIndex++
+                    } else {
+                        steps.add(ExerciseStep("第 ${steps.size + 1} 步", 60, 60))
+                        stepIndex = steps.lastIndex
+                    }
+                    stepName = steps[stepIndex].name
+                    stepDuration = steps[stepIndex].durationSeconds.toString()
+                    restDuration = steps[stepIndex].restSeconds.toString()
+                }) { Text("下一步") }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
+}
+
+private data class ExerciseRunState(
+    val stepIndex: Int,
+    val phase: String,
+    val phaseEndsAt: Long,
+    val running: Boolean,
+    val pausedAt: Long? = null,
+)
+
+private fun loadExerciseRunState(context: Context): ExerciseRunState? {
+    val raw = context.getSharedPreferences("exercise_run_state", Context.MODE_PRIVATE)
+        .getString("state", null) ?: return null
+    return runCatching {
+        JSONObject(raw).let {
+            ExerciseRunState(
+                stepIndex = it.getInt("stepIndex"),
+                phase = it.getString("phase"),
+                phaseEndsAt = it.getLong("phaseEndsAt"),
+                running = it.getBoolean("running"),
+                pausedAt = if (it.has("pausedAt") && !it.isNull("pausedAt")) it.getLong("pausedAt") else null
+            )
+        }
+    }.getOrNull()
+}
+
+private fun saveExerciseRunState(context: Context, state: ExerciseRunState?) {
+    val prefs = context.getSharedPreferences("exercise_run_state", Context.MODE_PRIVATE)
+    if (state == null) {
+        prefs.edit().remove("state").apply()
+        return
+    }
+    prefs.edit().putString("state", JSONObject().apply {
+        put("stepIndex", state.stepIndex)
+        put("phase", state.phase)
+        put("phaseEndsAt", state.phaseEndsAt)
+        put("running", state.running)
+        put("pausedAt", state.pausedAt)
+    }.toString()).apply()
+}
+
+@Composable
+private fun ExerciseRunScreen(
+    exercise: ExercisePlan,
+    onExit: () -> Unit,
+    onPause: () -> Unit,
+) {
+    val context = LocalContext.current
+    var runState by remember {
+        mutableStateOf(
+            loadExerciseRunState(context) ?: ExerciseRunState(
+                0,
+                "work",
+                System.currentTimeMillis() + ((exercise.steps.firstOrNull()?.durationSeconds ?: 0) * 1000L),
+                true
+            )
+        )
+    }
+    val currentStep = exercise.steps.getOrNull(runState.stepIndex)
+    val totalSeconds = if (runState.phase == "work") currentStep?.durationSeconds ?: 0 else currentStep?.restSeconds ?: 0
+    var tick by remember { mutableStateOf(System.currentTimeMillis()) }
+    val remainingSeconds = if (runState.running) {
+        ((runState.phaseEndsAt - tick) / 1000L).coerceAtLeast(0).toInt()
+    } else {
+        runState.pausedAt?.let { ((runState.phaseEndsAt - it) / 1000L).coerceAtLeast(0).toInt() } ?: ((runState.phaseEndsAt - tick) / 1000L).coerceAtLeast(0).toInt()
+    }
+    val color = if (runState.phase == "work") androidx.compose.ui.graphics.Color(0xFF4F7DF3) else androidx.compose.ui.graphics.Color(0xFF2FA66B)
+
+    LaunchedEffect(runState.stepIndex, runState.phase, runState.running, runState.phaseEndsAt) {
+        if (!runState.running) return@LaunchedEffect
+        while (runState.running) {
+            tick = System.currentTimeMillis()
+            val left = ((runState.phaseEndsAt - tick) / 1000L).coerceAtLeast(0)
+            if (left <= 0) break
+            kotlinx.coroutines.delay(250)
+        }
+        if (!runState.running) return@LaunchedEffect
+        val nextState = if (runState.phase == "work") {
+            val rest = currentStep?.restSeconds ?: 0
+            runState.copy(phase = "rest", phaseEndsAt = System.currentTimeMillis() + rest * 1000L)
+        } else {
+            if (runState.stepIndex < exercise.steps.lastIndex) {
+                val nextIndex = runState.stepIndex + 1
+                val nextDuration = exercise.steps[nextIndex].durationSeconds
+                runState.copy(stepIndex = nextIndex, phase = "work", phaseEndsAt = System.currentTimeMillis() + nextDuration * 1000L)
+            } else {
+                saveExerciseRunState(context, null)
+                onExit()
+                return@LaunchedEffect
+            }
+        }
+        runState = nextState
+        saveExerciseRunState(context, nextState)
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.SpaceBetween, horizontalAlignment = Alignment.CenterHorizontally) {
+            Spacer(modifier = Modifier.height(20.dp))
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.weight(1f)) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    progress = if (totalSeconds == 0) 0f else remainingSeconds.toFloat() / totalSeconds.toFloat(),
+                    modifier = Modifier.height(220.dp).fillMaxWidth(0.65f),
+                    strokeWidth = 10.dp,
+                    color = color
+                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(currentStep?.name ?: "完成", fontWeight = FontWeight.Bold)
+                    Text(formatSeconds(remainingSeconds))
+                    Text(if (runState.phase == "work") "运动中" else "休息中")
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = { saveExerciseRunState(context, null); onExit() }, modifier = Modifier.weight(1f), colors = redButtonColors()) { Text("退出运动") }
+                Button(onClick = {
+                    val now = System.currentTimeMillis()
+                    runState = if (runState.running) {
+                        runState.copy(running = false, pausedAt = now)
+                    } else {
+                        runState.copy(
+                            running = true,
+                            phaseEndsAt = runState.phaseEndsAt + (now - (runState.pausedAt ?: now)),
+                            pausedAt = null
+                        )
+                    }
+                    saveExerciseRunState(context, runState)
+                    onPause()
+                }, modifier = Modifier.weight(1f), colors = blueButtonColors()) { Text(if (runState.running) "暂停运动" else "继续运动") }
+            }
+        }
     }
 }
 
