@@ -10,6 +10,8 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Bundle
 import android.os.Environment
 import android.widget.Toast
@@ -38,6 +40,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -48,6 +51,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -512,25 +516,49 @@ private fun BloodPressureApp() {
                 NavigationBarItem(
                     selected = selectedTab == TabItem.SAVE,
                     onClick = { selectedTab = TabItem.SAVE },
-                    icon = { Text("＋") },
+                    icon = {
+                        Icon(
+                            painter = painterResource(id = R.drawable.save),
+                            contentDescription = "保存记录",
+                            modifier = Modifier.size(35.dp)
+                        )
+                    },
                     label = { Text("保存记录") }
                 )
                 NavigationBarItem(
                     selected = selectedTab == TabItem.HISTORY,
                     onClick = { selectedTab = TabItem.HISTORY },
-                    icon = { Text("≡") },
+                    icon = {
+                        Icon(
+                            painter = painterResource(id = R.drawable.record),
+                            contentDescription = "历史记录",
+                            modifier = Modifier.size(35.dp)
+                        )
+                    },
                     label = { Text("历史记录") }
                 )
                 NavigationBarItem(
                     selected = selectedTab == TabItem.TODO,
                     onClick = { selectedTab = TabItem.TODO },
-                    icon = { Text("•") },
+                    icon = {
+                        Icon(
+                            painter = painterResource(id = R.drawable.todo),
+                            contentDescription = "每日代办",
+                            modifier = Modifier.size(40.dp)
+                        )
+                    },
                     label = { Text("每日代办") }
                 )
                 NavigationBarItem(
                     selected = selectedTab == TabItem.EXERCISE,
                     onClick = { selectedTab = TabItem.EXERCISE },
-                    icon = { Text("＋") },
+                    icon = {
+                        Icon(
+                            painter = painterResource(id = R.drawable.exercise),
+                            contentDescription = "锻炼",
+                            modifier = Modifier.size(45.dp)
+                        )
+                    },
                     label = { Text("锻炼") }
                 )
             }
@@ -1464,6 +1492,7 @@ private fun ExerciseScreen(modifier: Modifier = Modifier) {
     var newExerciseName by remember { mutableStateOf("") }
     var activeExercise by remember { mutableStateOf<ExercisePlan?>(null) }
     var editingExercise by remember { mutableStateOf<ExercisePlan?>(null) }
+    var deleteTarget by remember { mutableStateOf<ExercisePlan?>(null) }
 
     fun refresh() { exercises = loadExercises(context) }
 
@@ -1483,15 +1512,23 @@ private fun ExerciseScreen(modifier: Modifier = Modifier) {
                                             .weight(1f)
                                             .aspectRatio(1f)
                                     ) {
-                                        Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                Text(exercise.name, fontWeight = FontWeight.Bold)
-                                                Text("共 ${exercise.steps.size} 步")
+                                        Box(modifier = Modifier.fillMaxSize()) {
+                                            Column(modifier = Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.SpaceBetween) {
+                                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    Text(exercise.name, fontWeight = FontWeight.Bold)
+                                                    Text("共 ${exercise.steps.size} 步")
+                                                }
+                                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                    Button(onClick = { activeExercise = exercise }, modifier = Modifier.weight(1f), colors = blueButtonColors()) { Text("开始") }
+                                                    Button(onClick = { editingExercise = exercise }, modifier = Modifier.weight(1f), colors = blueButtonColors()) { Text("编辑") }
+                                                }
                                             }
-                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                Button(onClick = { activeExercise = exercise }, modifier = Modifier.weight(1f), colors = blueButtonColors()) { Text("开始") }
-                                                Button(onClick = { editingExercise = exercise }, modifier = Modifier.weight(1f), colors = blueButtonColors()) { Text("编辑") }
-                                            }
+                                            Button(
+                                                onClick = { deleteTarget = exercise },
+                                                modifier = Modifier.align(Alignment.TopEnd),
+                                                colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color.Transparent, contentColor = androidx.compose.ui.graphics.Color.Red),
+                                                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                                            ) { Text("×", color = androidx.compose.ui.graphics.Color.Red, fontSize = 18.sp) }
                                         }
                                     }
                                 }
@@ -1515,6 +1552,23 @@ private fun ExerciseScreen(modifier: Modifier = Modifier) {
                 onPause = { /* 暂停预留 */ }
             )
         }
+    }
+
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("删除运动") },
+            text = { Text("确定要删除「${target.name}」吗？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    exercises = exercises.filterNot { it.id == target.id }
+                    saveExercises(context, exercises)
+                    deleteTarget = null
+                    refresh()
+                }) { Text("确定") }
+            },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("取消") } }
+        )
     }
 
     if (addDialogVisible) {
@@ -1662,6 +1716,11 @@ private fun saveExerciseRunState(context: Context, state: ExerciseRunState?) {
 }
 
 @Composable
+private fun rememberBeepPlayer(): ToneGenerator? {
+    return remember { runCatching { ToneGenerator(AudioManager.STREAM_MUSIC, 80) }.getOrNull() }
+}
+
+@Composable
 private fun ExerciseRunScreen(
     exercise: ExercisePlan,
     onExit: () -> Unit,
@@ -1681,6 +1740,7 @@ private fun ExerciseRunScreen(
     val currentStep = exercise.steps.getOrNull(runState.stepIndex)
     val totalSeconds = if (runState.phase == "work") currentStep?.durationSeconds ?: 0 else currentStep?.restSeconds ?: 0
     var tick by remember { mutableStateOf(System.currentTimeMillis()) }
+    var lastBeepSecond by remember { mutableStateOf(-1) }
     val remainingSeconds = if (runState.running) {
         ((runState.phaseEndsAt - tick) / 1000L).coerceAtLeast(0).toInt()
     } else {
@@ -1692,7 +1752,11 @@ private fun ExerciseRunScreen(
         if (!runState.running) return@LaunchedEffect
         while (runState.running) {
             tick = System.currentTimeMillis()
-            val left = ((runState.phaseEndsAt - tick) / 1000L).coerceAtLeast(0)
+            val left = ((runState.phaseEndsAt - tick) / 1000L).coerceAtLeast(0).toInt()
+            if (left in 1..5 && left != lastBeepSecond) {
+                lastBeepSecond = left
+                ToneGenerator(AudioManager.STREAM_ALARM, 100).startTone(ToneGenerator.TONE_PROP_BEEP, 140)
+            }
             if (left <= 0) break
             kotlinx.coroutines.delay(250)
         }
