@@ -17,16 +17,13 @@ import androidx.activity.ComponentActivity
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.rememberCoroutineScope
-import jxl.Workbook
-import jxl.format.Alignment as JxlAlignment
-import jxl.format.Border
-import jxl.format.BorderLineStyle
-import jxl.format.VerticalAlignment
-import jxl.write.Label
-import jxl.write.WritableCellFormat
-import jxl.write.WritableFont
-import jxl.write.WritableSheet
-import jxl.write.WritableWorkbook
+import org.apache.poi.ss.usermodel.BorderStyle
+import org.apache.poi.ss.usermodel.Cell
+import org.apache.poi.ss.usermodel.FillPatternType
+import org.apache.poi.ss.usermodel.HorizontalAlignment
+import org.apache.poi.ss.usermodel.Row
+import org.apache.poi.ss.usermodel.VerticalAlignment
+import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import kotlinx.coroutines.launch
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -222,46 +219,74 @@ private fun saveRecords(context: Context, records: List<BloodPressureRecord>) {
 
 private fun sanitizeFileName(name: String): String = name.replace(Regex("[\\/:*?\"<>|]"), "_")
 
-private fun exportXls(context: Context, records: List<BloodPressureRecord>, fileName: String): File {
+private fun exportXlsx(context: Context, records: List<BloodPressureRecord>, fileName: String): File {
     val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
     if (!downloads.exists()) downloads.mkdirs()
-    val file = File(downloads, sanitizeFileName(fileName))
+    val safeName = sanitizeFileName(fileName).removeSuffix(".xlsx").removeSuffix(".xls") + ".xlsx"
+    val file = File(downloads, safeName)
 
-    val headerFont = WritableFont(WritableFont.ARIAL, 11, WritableFont.BOLD)
-    val headerFormat = WritableCellFormat(headerFont).apply {
-        setAlignment(JxlAlignment.CENTRE)
-        setVerticalAlignment(VerticalAlignment.CENTRE)
-        setBorder(Border.ALL, BorderLineStyle.THIN)
-    }
-    val bodyFormat = WritableCellFormat(WritableFont(WritableFont.ARIAL, 11)).apply {
-        setAlignment(JxlAlignment.CENTRE)
-        setVerticalAlignment(VerticalAlignment.CENTRE)
-        setBorder(Border.ALL, BorderLineStyle.THIN)
-    }
-
-    val workbook = Workbook.createWorkbook(file)
+    val workbook = XSSFWorkbook()
     try {
-        val sheet: WritableSheet = workbook.createSheet("血压记录", 0)
+        val sheet = workbook.createSheet("血压记录")
+
+        val headerStyle = workbook.createCellStyle().apply {
+            alignment = HorizontalAlignment.CENTER
+            verticalAlignment = VerticalAlignment.CENTER
+            borderTop = BorderStyle.THIN
+            borderBottom = BorderStyle.THIN
+            borderLeft = BorderStyle.THIN
+            borderRight = BorderStyle.THIN
+            fillPattern = FillPatternType.SOLID_FOREGROUND
+            fillForegroundColor = 42
+        }
+        val bodyStyle = workbook.createCellStyle().apply {
+            alignment = HorizontalAlignment.CENTER
+            verticalAlignment = VerticalAlignment.CENTER
+            borderTop = BorderStyle.THIN
+            borderBottom = BorderStyle.THIN
+            borderLeft = BorderStyle.THIN
+            borderRight = BorderStyle.THIN
+        }
+
         val headers = listOf("序号", "时间", "高压（mmHg）", "低压（mmHg）", "脉搏（bpm）")
+        val headerRow = sheet.createRow(0)
         headers.forEachIndexed { column, title ->
-            sheet.addCell(Label(column, 0, title, headerFormat))
+            val cell = headerRow.createCell(column)
+            cell.setCellValue(title)
+            cell.cellStyle = headerStyle
         }
 
         records.forEachIndexed { index, record ->
-            val row = index + 1
-            sheet.addCell(Label(0, row, (index + 1).toString(), bodyFormat))
-            sheet.addCell(Label(1, row, formatDateTime(record.timestamp), bodyFormat))
-            sheet.addCell(Label(2, row, record.systolic.toString(), bodyFormat))
-            sheet.addCell(Label(3, row, record.diastolic.toString(), bodyFormat))
-            sheet.addCell(Label(4, row, record.pulse.toString(), bodyFormat))
+            val row = sheet.createRow(index + 1)
+            row.createCell(0).apply {
+                setCellValue((index + 1).toDouble())
+                cellStyle = bodyStyle
+            }
+            row.createCell(1).apply {
+                setCellValue(formatDateTime(record.timestamp))
+                cellStyle = bodyStyle
+            }
+            row.createCell(2).apply {
+                setCellValue(record.systolic.toDouble())
+                cellStyle = bodyStyle
+            }
+            row.createCell(3).apply {
+                setCellValue(record.diastolic.toDouble())
+                cellStyle = bodyStyle
+            }
+            row.createCell(4).apply {
+                setCellValue(record.pulse.toDouble())
+                cellStyle = bodyStyle
+            }
         }
 
-        sheet.setColumnView(0, 8)
-        sheet.setColumnView(1, 22)
-        sheet.setColumnView(2, 14)
-        sheet.setColumnView(3, 14)
-        sheet.setColumnView(4, 14)
-        workbook.write()
+        sheet.setColumnWidth(0, 8 * 256)
+        sheet.setColumnWidth(1, 22 * 256)
+        sheet.setColumnWidth(2, 14 * 256)
+        sheet.setColumnWidth(3, 14 * 256)
+        sheet.setColumnWidth(4, 14 * 256)
+
+        FileOutputStream(file).use { workbook.write(it) }
     } finally {
         workbook.close()
     }
@@ -293,7 +318,7 @@ private fun importRecordsFromCsv(context: Context, csvContent: String): Int {
     return imported.size
 }
 
-private fun importRecordsFromXls(context: Context, uri: android.net.Uri): Int {
+private fun importRecordsFromXlsx(context: Context, uri: android.net.Uri): Int {
     val existing = loadRecords(context).toMutableList()
     val imported = mutableListOf<BloodPressureRecord>()
     val errors = mutableListOf<String>()
@@ -638,7 +663,7 @@ private fun HistoryScreen(
             runCatching {
                 context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 val count = if ((context.contentResolver.getType(uri) ?: "").contains("sheet") || uri.toString().endsWith(".xlsx", true) || uri.toString().endsWith(".xls", true)) {
-                    importRecordsFromXls(context, uri)
+                    importRecordsFromXlsx(context, uri)
                 } else {
                     context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { importRecordsFromCsv(context, it.readText()) } ?: 0
                 }
@@ -709,7 +734,7 @@ private fun HistoryScreen(
             val start = startEnd.first
             val end = startEnd.second
             val monthlyRecords = records.filter { it.timestamp in start..end }
-            exportMessage = "已导出到 ${exportXls(context, monthlyRecords, "血压记录_${monthText}.xls").absolutePath}"
+            exportMessage = "已导出到 ${exportXlsx(context, monthlyRecords, "血压记录_${monthText}.xlsx").absolutePath}"
             exportDialogVisible = false
         },
         onExportWeek = {
@@ -719,7 +744,7 @@ private fun HistoryScreen(
             val weekRecords = records.filter { it.timestamp in start..end }
             val startText = SimpleDateFormat("yyyy年M月d号", Locale.getDefault()).format(Date(start))
             val endText = SimpleDateFormat("d号", Locale.getDefault()).format(Date(end))
-            exportMessage = "已导出到 ${exportXls(context, weekRecords, "血压记录_${startText}至${endText}.xls").absolutePath}"
+            exportMessage = "已导出到 ${exportXlsx(context, weekRecords, "血压记录_${startText}至${endText}.xlsx").absolutePath}"
             exportDialogVisible = false
         },
         onCustom = { exportDialogVisible = false; customExportVisible = true }
@@ -739,8 +764,8 @@ private fun HistoryScreen(
                 val s = minOf(start, end)
                 val e = maxOf(start, end)
                 val customRecords = records.filter { it.timestamp in s..e }
-                val fileName = "血压记录_${SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(s))}至${SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(e))}.xls"
-                exportMessage = "已导出到 ${exportXls(context, customRecords, fileName).absolutePath}"
+                val fileName = "血压记录_${SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(s))}至${SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(e))}.xlsx"
+                exportMessage = "已导出到 ${exportXlsx(context, customRecords, fileName).absolutePath}"
                 customExportVisible = false
             }
         }
