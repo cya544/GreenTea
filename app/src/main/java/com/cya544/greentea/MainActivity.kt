@@ -81,6 +81,8 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -471,7 +473,7 @@ private fun deleteRecord(context: Context, id: Long) {
 private enum class TabItem {
     SAVE,
     HISTORY,
-    // TODO,
+    TODO,
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -510,6 +512,12 @@ private fun BloodPressureApp() {
                     icon = { Text("≡") },
                     label = { Text("历史记录") }
                 )
+                NavigationBarItem(
+                    selected = selectedTab == TabItem.TODO,
+                    onClick = { selectedTab = TabItem.TODO },
+                    icon = { Text("•") },
+                    label = { Text("每日代办") }
+                )
             }
         }
     ) { innerPadding ->
@@ -529,7 +537,7 @@ private fun BloodPressureApp() {
                 },
                 onImported = { refresh() }
             )
-            // TabItem.TODO -> TodoScreen(modifier = Modifier.padding(innerPadding))
+            TabItem.TODO -> TodoScreen(modifier = Modifier.padding(innerPadding))
         }
     }
 
@@ -1030,10 +1038,337 @@ private fun CustomExportDialog(visible: Boolean, onDismiss: () -> Unit, onPickSt
     )
 }
 
+private data class TodoItem(
+    val id: Long,
+    val dateKey: String,
+    val title: String,
+    val done: Boolean = false,
+)
+
+private fun loadTodos(context: Context): List<TodoItem> {
+    val raw = context.getSharedPreferences("todo_records", Context.MODE_PRIVATE)
+        .getString("todos", "[]") ?: "[]"
+    return runCatching {
+        val array = JSONArray(raw)
+        buildList {
+            for (i in 0 until array.length()) {
+                val item = array.getJSONObject(i)
+                add(
+                    TodoItem(
+                        id = item.getLong("id"),
+                        dateKey = item.getString("dateKey"),
+                        title = item.getString("title"),
+                        done = item.getBoolean("done")
+                    )
+                )
+            }
+        }
+    }.getOrElse { emptyList() }
+}
+
+private fun saveTodos(context: Context, todos: List<TodoItem>) {
+    val array = JSONArray()
+    todos.forEach { todo ->
+        array.put(JSONObject().apply {
+            put("id", todo.id)
+            put("dateKey", todo.dateKey)
+            put("title", todo.title)
+            put("done", todo.done)
+        })
+    }
+    context.getSharedPreferences("todo_records", Context.MODE_PRIVATE)
+        .edit()
+        .putString("todos", array.toString())
+        .apply()
+}
+
+private fun monthKey(calendar: Calendar): String = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(calendar.time)
+
+private fun firstDayOfMonth(calendar: Calendar): Calendar = (calendar.clone() as Calendar).apply {
+    set(Calendar.DAY_OF_MONTH, 1)
+    set(Calendar.HOUR_OF_DAY, 0)
+    set(Calendar.MINUTE, 0)
+    set(Calendar.SECOND, 0)
+    set(Calendar.MILLISECOND, 0)
+}
+
+@Composable
+private fun TodoCalendarHeader(calendar: Calendar, onPrevMonth: () -> Unit, onNextMonth: () -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        TextButton(onClick = onPrevMonth) { Text("<", fontSize = 14.sp) }
+        Text(SimpleDateFormat("yyyy年MM月", Locale.getDefault()).format(calendar.time), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        TextButton(onClick = onNextMonth) { Text(">", fontSize = 14.sp) }
+    }
+}
+
+@Composable
+private fun CalendarDayButton(
+    dayText: String,
+    isSelected: Boolean,
+    isToday: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = when {
+        isSelected -> blueButtonColors()
+        isToday -> ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color(0xFF2FA66B), contentColor = androidx.compose.ui.graphics.Color.White)
+        else -> ButtonDefaults.buttonColors()
+    }
+    Button(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(36.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+        colors = colors
+    ) {
+        Text(dayText, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Clip)
+    }
+}
+
+@Composable
+private fun ExpandedMonthCard(
+    currentMonth: Calendar,
+    selectedDate: Long,
+    todos: List<TodoItem>,
+    onSelectDate: (Long) -> Unit,
+    onPrevMonth: () -> Unit,
+    onNextMonth: () -> Unit,
+) {
+    val startOfMonth = firstDayOfMonth(currentMonth)
+    val daysInMonth = currentMonth.getActualMaximum(Calendar.DAY_OF_MONTH)
+    val firstWeekday = (startOfMonth.get(Calendar.DAY_OF_WEEK) + 5) % 7
+    val todayKey = formatDateOnly(System.currentTimeMillis())
+    val selectedKey = formatDateOnly(selectedDate)
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        TodoCalendarHeader(calendar = currentMonth, onPrevMonth = onPrevMonth, onNextMonth = onNextMonth)
+        val weekLabels = listOf("一", "二", "三", "四", "五", "六", "日")
+        Row(modifier = Modifier.fillMaxWidth()) {
+            weekLabels.forEach { label -> Text(label, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 13.sp) }
+        }
+        val totalCells = firstWeekday + daysInMonth
+        val rows = (totalCells + 6) / 7
+        var day = 1
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            repeat(rows) {
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    repeat(7) { col ->
+                        val cellIndex = it * 7 + col
+                        val isValid = cellIndex >= firstWeekday && day <= daysInMonth
+                        val dateMillis = if (isValid) {
+                            Calendar.getInstance().apply {
+                                timeInMillis = currentMonth.timeInMillis
+                                set(Calendar.DAY_OF_MONTH, day)
+                                set(Calendar.HOUR_OF_DAY, 0)
+                                set(Calendar.MINUTE, 0)
+                                set(Calendar.SECOND, 0)
+                                set(Calendar.MILLISECOND, 0)
+                            }.timeInMillis
+                        } else 0L
+                        val dateKey = if (isValid) formatDateOnly(dateMillis) else ""
+                        val hasTodo = isValid && todos.any { it.dateKey == dateKey }
+                        val isSelected = isValid && dateKey == selectedKey
+                        Box(modifier = Modifier.weight(1f).padding(2.dp)) {
+                            if (isValid) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    CalendarDayButton(
+                                        dayText = day.toString(),
+                                        isSelected = isSelected,
+                                        isToday = dateKey == todayKey,
+                                        onClick = { onSelectDate(dateMillis) }
+                                    )
+                                    if (hasTodo) {
+                                        Box(
+                                            modifier = Modifier
+                                                .padding(top = 4.dp)
+                                                .height(4.dp)
+                                                .fillMaxWidth(0.25f)
+                                                .background(androidx.compose.ui.graphics.Color(0xFF2FA66B), RoundedCornerShape(999.dp))
+                                        )
+                                    }
+                                }
+                                day++
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun TodoScreen(modifier: Modifier = Modifier) {
-    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("每日代办页面暂未实现")
+    val context = LocalContext.current
+    val todayMillis = remember { System.currentTimeMillis() }
+    var todos by remember { mutableStateOf(loadTodos(context)) }
+    var selectedDate by remember { mutableStateOf(todayMillis) }
+    var currentMonth by remember { mutableStateOf(Calendar.getInstance()) }
+    var addDialogVisible by remember { mutableStateOf(false) }
+    var addTitle by remember { mutableStateOf("") }
+    var addDateChoice by remember { mutableStateOf(0) }
+    var calendarExpanded by remember { mutableStateOf(true) }
+
+    fun refresh() { todos = loadTodos(context) }
+    fun setToday() {
+        selectedDate = todayMillis
+        currentMonth = Calendar.getInstance()
+    }
+    fun carryOverUnfinishedFromYesterday() {
+        val today = formatDateOnly(System.currentTimeMillis())
+        val yesterday = formatDateOnly(System.currentTimeMillis() - 24L * 60 * 60 * 1000)
+        val pending = todos.filter { it.dateKey == yesterday && !it.done }
+        if (pending.isNotEmpty()) {
+            val updated = todos.filterNot { it.dateKey == yesterday && !it.done } + pending.map {
+                it.copy(id = System.currentTimeMillis() + it.id, dateKey = today, done = false)
+            }
+            saveTodos(context, updated)
+            todos = updated
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        setToday()
+        refresh()
+        carryOverUnfinishedFromYesterday()
+        refresh()
+    }
+
+    val selectedTodos = todos.filter { it.dateKey == formatDateOnly(selectedDate) }
+    val startOfMonth = firstDayOfMonth(currentMonth)
+    val daysInMonth = currentMonth.getActualMaximum(Calendar.DAY_OF_MONTH)
+    val firstWeekday = (startOfMonth.get(Calendar.DAY_OF_WEEK) + 5) % 7
+    val todayKey = formatDateOnly(System.currentTimeMillis())
+    val selectedKey = formatDateOnly(selectedDate)
+
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Card {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("每日代办", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    if (calendarExpanded) {
+                        TodoCalendarHeader(
+                            calendar = currentMonth,
+                            onPrevMonth = { currentMonth = (currentMonth.clone() as Calendar).apply { add(Calendar.MONTH, -1) } },
+                            onNextMonth = { currentMonth = (currentMonth.clone() as Calendar).apply { add(Calendar.MONTH, 1) } }
+                        )
+                        val weekLabels = listOf("一", "二", "三", "四", "五", "六", "日")
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            weekLabels.forEach { label -> Text(label, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold) }
+                        }
+                        val totalCells = firstWeekday + daysInMonth
+                        val rows = (totalCells + 6) / 7
+                        var day = 1
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            repeat(rows) {
+                                Row(modifier = Modifier.fillMaxWidth()) {
+                                    repeat(7) { col ->
+                                        val cellIndex = it * 7 + col
+                                        val isValid = cellIndex >= firstWeekday && day <= daysInMonth
+                                        val dateMillis = if (isValid) {
+                                            Calendar.getInstance().apply {
+                                                timeInMillis = currentMonth.timeInMillis
+                                                set(Calendar.DAY_OF_MONTH, day)
+                                                set(Calendar.HOUR_OF_DAY, 0)
+                                                set(Calendar.MINUTE, 0)
+                                                set(Calendar.SECOND, 0)
+                                                set(Calendar.MILLISECOND, 0)
+                                            }.timeInMillis
+                                        } else 0L
+                                        val dateKey = if (isValid) formatDateOnly(dateMillis) else ""
+                                        val hasTodo = isValid && todos.any { it.dateKey == dateKey }
+                                        val isSelected = isValid && dateKey == selectedKey
+                                        Box(modifier = Modifier.weight(1f).padding(2.dp)) {
+                                            if (isValid) {
+                                                CalendarDayButton(
+                                                    dayText = day.toString(),
+                                                    isSelected = isSelected,
+                                                    isToday = dateKey == todayKey,
+                                                    onClick = { selectedDate = dateMillis }
+                                                )
+                                                if (hasTodo) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .align(Alignment.BottomEnd)
+                                                            .padding(6.dp)
+                                                            .height(6.dp)
+                                                            .fillMaxWidth()
+                                                    )
+                                                }
+                                                day++
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Text(formatDateOnly(selectedDate), fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    TextButton(onClick = { calendarExpanded = !calendarExpanded }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (calendarExpanded) "收起月历" else "展开月历")
+                    }
+                }
+            }
+
+            Card(modifier = Modifier.weight(1f)) {
+                if (selectedTodos.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("暂无代办事项") }
+                } else {
+                    LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(selectedTodos, key = { it.id }) { todo ->
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                androidx.compose.material3.Checkbox(
+                                    checked = todo.done,
+                                    onCheckedChange = { checked ->
+                                        val updated = todos.map { if (it.id == todo.id) it.copy(done = checked) else it }
+                                        saveTodos(context, updated)
+                                        refresh()
+                                    }
+                                )
+                                Text(todo.title, modifier = Modifier.padding(start = 8.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Button(
+            onClick = { addDialogVisible = true },
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = 96.dp),
+            shape = RoundedCornerShape(999.dp)
+        ) { Text("＋") }
+    }
+
+    if (addDialogVisible) {
+        AlertDialog(
+            onDismissRequest = { },
+            title = { Text("新增代办事项") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(value = addTitle, onValueChange = { addTitle = it }, label = { Text("事项内容") }, modifier = Modifier.fillMaxWidth())
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { addDateChoice = 0 }, colors = if (addDateChoice == 0) blueButtonColors() else ButtonDefaults.buttonColors()) { Text("今天") }
+                        Button(onClick = { addDateChoice = 1 }, colors = if (addDateChoice == 1) blueButtonColors() else ButtonDefaults.buttonColors()) { Text("明天") }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val targetDate = Calendar.getInstance().apply {
+                        timeInMillis = System.currentTimeMillis()
+                        if (addDateChoice == 1) add(Calendar.DAY_OF_MONTH, 1)
+                    }.timeInMillis
+                    val item = TodoItem(System.currentTimeMillis(), formatDateOnly(targetDate), addTitle.ifBlank { "未命名代办" }, false)
+                    saveTodos(context, listOf(item) + todos)
+                    addTitle = ""
+                    addDialogVisible = false
+                    refresh()
+                }) { Text("确定") }
+            },
+            dismissButton = { TextButton(onClick = { addDialogVisible = false }) { Text("取消") } }
+        )
     }
 }
 
