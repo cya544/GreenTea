@@ -70,6 +70,8 @@ dependencies {
     implementation(libs.material)
     implementation("org.apache.poi:poi:5.2.5")
     implementation("org.apache.poi:poi-ooxml:5.2.5")
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("androidx.activity:activity-compose:1.8.0")
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)

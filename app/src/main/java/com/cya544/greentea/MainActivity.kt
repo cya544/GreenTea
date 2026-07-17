@@ -7,15 +7,18 @@ import android.animation.ObjectAnimator
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.content.Context
+import android.content.Intent
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.widget.Toast
-import android.net.Uri
 import android.view.View
 import android.view.animation.DecelerateInterpolator
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import org.apache.poi.ss.usermodel.BorderStyle
 import org.apache.poi.ss.usermodel.Cell
@@ -61,8 +64,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
+import androidx.activity.result.contract.ActivityResultContracts.TakePicture
+import androidx.core.content.FileProvider
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,8 +76,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -552,6 +562,50 @@ private fun SaveScreen(
     var diastolic by remember { mutableStateOf("") }
     var pulse by remember { mutableStateOf("") }
     var selectedDateTime by remember { mutableStateOf(System.currentTimeMillis()) }
+    var photoUri by remember { mutableStateOf<Uri?>(null) }
+    var showOcrNotice by remember { mutableStateOf(false) }
+    var ocrResultText by remember { mutableStateOf("") }
+
+    fun runOcrFromUri(uri: Uri) {
+        val bitmap = runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= 28) {
+                android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, uri))
+            } else {
+                @Suppress("DEPRECATION")
+                BitmapFactory.decodeStream(context.contentResolver.openInputStream(uri))
+            }
+        }.getOrNull()
+        if (bitmap != null) {
+            val recognizer = com.google.mlkit.vision.text.TextRecognition.getClient(com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS)
+            val image = com.google.mlkit.vision.common.InputImage.fromBitmap(bitmap, 0)
+            recognizer.process(image)
+                .addOnSuccessListener { result ->
+                    val text = result.text
+                    ocrResultText = text
+                    val numbers = Regex("\\d+").findAll(text).map { it.value.toIntOrNull() }.filterNotNull().toList()
+                    if (numbers.size >= 3) {
+                        systolic = numbers[0].toString()
+                        diastolic = numbers[1].toString()
+                        pulse = numbers[2].toString()
+                    }
+                    showOcrNotice = true
+                }
+                .addOnFailureListener {
+                    Toast.makeText(context, "OCR识别失败：${it.message}", Toast.LENGTH_SHORT).show()
+                }
+        }
+    }
+
+    val photoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        if (success) {
+            val uri = photoUri ?: return@rememberLauncherForActivityResult
+            runOcrFromUri(uri)
+        }
+    }
+
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) runOcrFromUri(uri)
+    }
 
     fun refresh() {
         records = loadRecords(context)
@@ -609,9 +663,43 @@ private fun SaveScreen(
                     }, colors = greenButtonColors()) { Text("修改时间") }
                     Button(onClick = { selectedDateTime = System.currentTimeMillis() }, colors = blueButtonColors()) { Text("更新时间") }
                 }
-                Text("当前时间：${formatDateTime(selectedDateTime)}")
-                Button(onClick = { saveNewRecord() }, modifier = Modifier.fillMaxWidth(), colors = blueButtonColors()) { Text("保存记录") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = {
+                        val tempDir = File(context.cacheDir, "camera").apply { mkdirs() }
+                        val imgFile = File.createTempFile("ocr_", ".jpg", tempDir)
+                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", imgFile)
+                        photoUri = uri
+                        photoLauncher.launch(uri)
+                    }, modifier = Modifier.weight(1f), colors = greenButtonColors()) { Text("拍照识别") }
+                    Button(onClick = {
+                        galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }, modifier = Modifier.weight(1f), colors = greenButtonColors()) { Text("图库识别") }
+                    Button(onClick = { saveNewRecord() }, modifier = Modifier.weight(1f), colors = blueButtonColors()) { Text("保存记录") }
+                }
             }
+        }
+
+        if (showOcrNotice) {
+            AlertDialog(
+                onDismissRequest = { },
+                title = { Text("识别完成") },
+                text = {
+                    Text(
+                        buildAnnotatedString {
+                            append("已按照高压、低压、脉搏顺序，从上到下识别文字并回写，但是OCR识别")
+                            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                                append("难免有误")
+                            }
+                            append("，请您自行校准再保存。")
+                        }
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showOcrNotice = false
+                    }) { Text("确定") }
+                }
+            )
         }
 
         Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
