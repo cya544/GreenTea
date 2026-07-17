@@ -33,6 +33,7 @@ import kotlinx.coroutines.launch
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -1523,12 +1524,20 @@ private fun ExerciseScreen(modifier: Modifier = Modifier) {
                                                     Button(onClick = { editingExercise = exercise }, modifier = Modifier.weight(1f), colors = blueButtonColors()) { Text("编辑") }
                                                 }
                                             }
-                                            Button(
-                                                onClick = { deleteTarget = exercise },
-                                                modifier = Modifier.align(Alignment.TopEnd),
-                                                colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color.Transparent, contentColor = androidx.compose.ui.graphics.Color.Red),
-                                                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
-                                            ) { Text("×", color = androidx.compose.ui.graphics.Color.Red, fontSize = 18.sp) }
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .padding(6.dp)
+                                                    .background(androidx.compose.ui.graphics.Color.White, RoundedCornerShape(999.dp))
+                                                    .border(1.5.dp, androidx.compose.ui.graphics.Color.Red, RoundedCornerShape(999.dp))
+                                            ) {
+                                                Button(
+                                                    onClick = { deleteTarget = exercise },
+                                                    modifier = Modifier.size(24.dp),
+                                                    colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color.Transparent, contentColor = androidx.compose.ui.graphics.Color.Red),
+                                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                                                ) { Text("×", color = androidx.compose.ui.graphics.Color.Red, fontSize = 14.sp) }
+                                            }
                                         }
                                     }
                                 }
