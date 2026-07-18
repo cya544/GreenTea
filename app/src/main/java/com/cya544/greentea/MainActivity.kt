@@ -20,6 +20,7 @@ import android.widget.LinearLayout
 import android.widget.NumberPicker
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.core.content.edit
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.LaunchedEffect
@@ -269,15 +270,14 @@ private fun saveRecords(context: Context, records: List<BloodPressureRecord>) {
                 .put("timestamp", record.timestamp)
         )
     }
-    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        .edit()
-        .putString(KEY_RECORDS, array.toString())
-        .apply()
+    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
+        putString(KEY_RECORDS, array.toString())
+    }
 }
 
-private fun sanitizeFileName(name: String): String = name.replace(Regex("[\\/:*?\"<>|]"), "_")
+private fun sanitizeFileName(name: String): String = name.replace(Regex("[/:*?\"<>|]"), "_")
 
-private fun exportXlsx(context: Context, records: List<BloodPressureRecord>, fileName: String): File {
+private fun exportXlsx(records: List<BloodPressureRecord>, fileName: String): File {
     val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
     if (!downloads.exists()) downloads.mkdirs()
     val safeName = sanitizeFileName(fileName).removeSuffix(".xlsx").removeSuffix(".xls") + ".xlsx"
@@ -376,7 +376,7 @@ private fun importRecordsFromCsv(context: Context, csvContent: String): Int {
     return imported.size
 }
 
-private fun importRecordsFromXlsx(context: Context, uri: android.net.Uri): Int {
+private fun importRecordsFromXlsx(context: Context, uri: Uri): Int {
     val existing = loadRecords(context).toMutableList()
     val imported = mutableListOf<BloodPressureRecord>()
     val errors = mutableListOf<String>()
@@ -650,7 +650,6 @@ private fun SaveScreen(
     var selectedDateTime by remember { mutableStateOf(System.currentTimeMillis()) }
     var photoUri by remember { mutableStateOf<Uri?>(null) }
     var showOcrNotice by remember { mutableStateOf(false) }
-    var ocrResultText by remember { mutableStateOf("") }
 
     fun runOcrFromUri(uri: Uri) {
         val bitmap = runCatching {
@@ -667,7 +666,6 @@ private fun SaveScreen(
             recognizer.process(image)
                 .addOnSuccessListener { result ->
                     val text = result.text
-                    ocrResultText = text
                     val numbers = Regex("\\d+").findAll(text).map { it.value.toIntOrNull() }.filterNotNull().toList()
                     if (numbers.size >= 3) {
                         systolic = numbers[0].toString()
@@ -921,7 +919,7 @@ private fun HistoryScreen(
             val start = startEnd.first
             val end = startEnd.second
             val monthlyRecords = records.filter { it.timestamp in start..end }
-            exportMessage = "已导出到 ${exportXlsx(context, monthlyRecords, "血压记录_${monthText}.xlsx").absolutePath}"
+            exportMessage = "已导出到 ${exportXlsx(monthlyRecords, "血压记录_${monthText}.xlsx").absolutePath}"
             exportDialogVisible = false
         },
         onExportWeek = {
@@ -931,7 +929,7 @@ private fun HistoryScreen(
             val weekRecords = records.filter { it.timestamp in start..end }
             val startText = SimpleDateFormat("yyyy年M月d号", Locale.getDefault()).format(Date(start))
             val endText = SimpleDateFormat("d号", Locale.getDefault()).format(Date(end))
-            exportMessage = "已导出到 ${exportXlsx(context, weekRecords, "血压记录_${startText}至${endText}.xlsx").absolutePath}"
+            exportMessage = "已导出到 ${exportXlsx(weekRecords, "血压记录_${startText}至${endText}.xlsx").absolutePath}"
             exportDialogVisible = false
         },
         onCustom = { exportDialogVisible = false; customExportVisible = true }
@@ -952,7 +950,7 @@ private fun HistoryScreen(
                 val e = maxOf(start, end)
                 val customRecords = records.filter { it.timestamp in s..e }
                 val fileName = "血压记录_${SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(s))}至${SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(e))}.xlsx"
-                exportMessage = "已导出到 ${exportXlsx(context, customRecords, fileName).absolutePath}"
+                exportMessage = "已导出到 ${exportXlsx(customRecords, fileName).absolutePath}"
                 customExportVisible = false
             }
         }
