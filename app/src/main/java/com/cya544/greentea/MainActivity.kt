@@ -35,6 +35,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -517,121 +518,176 @@ private fun deleteRecord(context: Context, id: Long) {
 }
 
 private enum class TabItem {
-    SAVE,
-    HISTORY,
+    RECORD,
     TODO,
     EXERCISE,
+    SETTINGS,
+}
+
+private enum class RecordTabItem {
+    SAVE,
+    HISTORY,
+}
+
+private const val SETTINGS_PREFS = "app_settings"
+private const val KEY_FOLLOW_SYSTEM_THEME = "follow_system_theme"
+private const val KEY_DARK_THEME = "dark_theme"
+
+private fun loadThemeSettings(context: Context): Pair<Boolean, Boolean> {
+    val prefs = context.getSharedPreferences(SETTINGS_PREFS, Context.MODE_PRIVATE)
+    return prefs.getBoolean(KEY_FOLLOW_SYSTEM_THEME, true) to prefs.getBoolean(KEY_DARK_THEME, false)
+}
+
+private fun saveThemeSettings(context: Context, followSystem: Boolean, darkTheme: Boolean) {
+    context.getSharedPreferences(SETTINGS_PREFS, Context.MODE_PRIVATE).edit {
+        putBoolean(KEY_FOLLOW_SYSTEM_THEME, followSystem)
+        putBoolean(KEY_DARK_THEME, darkTheme)
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BloodPressureApp() {
     val context = LocalContext.current
-    var selectedTab by remember { mutableStateOf(TabItem.SAVE) }
+    var selectedTab by remember { mutableStateOf(TabItem.RECORD) }
     var records by remember { mutableStateOf(emptyList<BloodPressureRecord>()) }
-    var deleteTarget by remember { mutableStateOf<BloodPressureRecord?>(null) }
+    val (storedFollowSystem, storedDarkTheme) = remember { loadThemeSettings(context) }
+    var followSystemTheme by remember { mutableStateOf(storedFollowSystem) }
+    var darkTheme by remember { mutableStateOf(storedDarkTheme) }
 
     fun refresh() {
         records = loadRecords(context)
+    }
+
+    fun persistTheme() {
+        saveThemeSettings(context, followSystemTheme, darkTheme)
     }
 
     LaunchedEffect(Unit) {
         records = loadRecords(context)
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        Scaffold(
-        bottomBar = {
-            NavigationBar {
-                NavigationBarItem(
-                    selected = selectedTab == TabItem.SAVE,
-                    onClick = { selectedTab = TabItem.SAVE },
-                    icon = {
-                        Icon(
-                            painter = painterResource(id = R.drawable.save),
-                            contentDescription = "保存记录",
-                            modifier = Modifier.size(35.dp)
-                        )
-                    },
-                    label = { Text("保存记录") }
-                )
-                NavigationBarItem(
-                    selected = selectedTab == TabItem.HISTORY,
-                    onClick = { selectedTab = TabItem.HISTORY },
-                    icon = {
-                        Icon(
-                            painter = painterResource(id = R.drawable.record),
-                            contentDescription = "历史记录",
-                            modifier = Modifier.size(35.dp)
-                        )
-                    },
-                    label = { Text("历史记录") }
-                )
-                NavigationBarItem(
-                    selected = selectedTab == TabItem.TODO,
-                    onClick = { selectedTab = TabItem.TODO },
-                    icon = {
-                        Icon(
-                            painter = painterResource(id = R.drawable.todo),
-                            contentDescription = "每日代办",
-                            modifier = Modifier.size(40.dp)
-                        )
-                    },
-                    label = { Text("每日代办") }
-                )
-                NavigationBarItem(
-                    selected = selectedTab == TabItem.EXERCISE,
-                    onClick = { selectedTab = TabItem.EXERCISE },
-                    icon = {
-                        Icon(
-                            painter = painterResource(id = R.drawable.exercise),
-                            contentDescription = "锻炼",
-                            modifier = Modifier.size(45.dp)
-                        )
-                    },
-                    label = { Text("锻炼") }
-                )
+    val systemDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val useDarkTheme = if (followSystemTheme) systemDark else darkTheme
+
+    GreenTeaTheme(darkTheme = useDarkTheme) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            Scaffold(
+                bottomBar = {
+                    NavigationBar {
+                    NavigationBarItem(
+                        selected = selectedTab == TabItem.RECORD,
+                        onClick = { selectedTab = TabItem.RECORD },
+                        icon = {
+                            Icon(
+                                painter = painterResource(id = R.drawable.save),
+                                contentDescription = "记录",
+                                modifier = Modifier.size(35.dp)
+                            )
+                        },
+                        label = { Text("记录") }
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == TabItem.TODO,
+                        onClick = { selectedTab = TabItem.TODO },
+                        icon = {
+                            Icon(
+                                painter = painterResource(id = R.drawable.todo),
+                                contentDescription = "每日代办",
+                                modifier = Modifier.size(40.dp)
+                            )
+                        },
+                        label = { Text("每日代办") }
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == TabItem.EXERCISE,
+                        onClick = { selectedTab = TabItem.EXERCISE },
+                        icon = {
+                            Icon(
+                                painter = painterResource(id = R.drawable.exercise),
+                                contentDescription = "锻炼",
+                                modifier = Modifier.size(45.dp)
+                            )
+                        },
+                        label = { Text("锻炼") }
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == TabItem.SETTINGS,
+                        onClick = { selectedTab = TabItem.SETTINGS },
+                        icon = {
+                            Icon(
+                                painter = painterResource(id = R.drawable.settings),
+                                contentDescription = "设置",
+                                modifier = Modifier.size(35.dp)
+                            )
+                        },
+                        label = { Text("设置") }
+                    )
+                }
+            }
+            ) { innerPadding ->
+                when (selectedTab) {
+                    TabItem.RECORD -> RecordScreen(
+                        context = context,
+                        records = records,
+                        modifier = Modifier.padding(innerPadding),
+                        onRecordsChanged = { refresh() },
+                        onDelete = {
+                            deleteRecord(context, it.id)
+                            refresh()
+                        },
+                        onImported = { refresh() }
+                    )
+                    TabItem.TODO -> TodoScreen(modifier = Modifier.padding(innerPadding))
+                    TabItem.EXERCISE -> ExerciseScreen(modifier = Modifier.padding(innerPadding))
+                    TabItem.SETTINGS -> SettingsScreen(
+                        modifier = Modifier.padding(innerPadding),
+                        followSystemTheme = followSystemTheme,
+                        darkTheme = darkTheme,
+                        onFollowSystemThemeChange = {
+                            followSystemTheme = it
+                            persistTheme()
+                        },
+                        onDarkThemeChange = {
+                            darkTheme = it
+                            persistTheme()
+                        }
+                    )
+                }
             }
         }
-    ) { innerPadding ->
-        when (selectedTab) {
-            TabItem.SAVE -> SaveScreen(
+    }
+}
+
+@Composable
+private fun RecordScreen(
+    context: Context,
+    records: List<BloodPressureRecord>,
+    modifier: Modifier = Modifier,
+    onRecordsChanged: () -> Unit,
+    onDelete: (BloodPressureRecord) -> Unit,
+    onImported: () -> Unit,
+) {
+    var selectedRecordTab by remember { mutableStateOf(RecordTabItem.SAVE) }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        RecordTopTabBar(selectedTab = selectedRecordTab, onSelected = { selectedRecordTab = it })
+        when (selectedRecordTab) {
+            RecordTabItem.SAVE -> SaveScreen(
                 context = context,
-                modifier = Modifier.padding(innerPadding),
-                onRecordsChanged = { refresh() }
+                modifier = Modifier.weight(1f),
+                onRecordsChanged = onRecordsChanged,
             )
-            TabItem.HISTORY -> HistoryScreen(
+            RecordTabItem.HISTORY -> HistoryScreen(
                 context = context,
                 records = records,
-                modifier = Modifier.padding(innerPadding),
-                onDelete = {
-                    deleteRecord(context, it.id)
-                    refresh()
-                },
-                onImported = { refresh() }
-            )
-            TabItem.TODO -> TodoScreen(modifier = Modifier.padding(innerPadding))
-            TabItem.EXERCISE -> ExerciseScreen(modifier = Modifier.padding(innerPadding))
-        }
-    }
-
-        deleteTarget?.let { target ->
-            AlertDialog(
-                onDismissRequest = { deleteTarget = null },
-                title = { Text("确认删除") },
-                text = { Text("确定要删除这条记录吗？") },
-                confirmButton = {
-                    TextButton(onClick = {
-                        deleteRecord(context, target.id)
-                        refresh()
-                        deleteTarget = null
-                    }) { Text("删除") }
-                },
-                dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("取消") } }
+                modifier = Modifier.weight(1f),
+                onDelete = onDelete,
+                onImported = onImported,
             )
         }
     }
@@ -822,7 +878,6 @@ private fun SaveScreen(
         }
     }
 }
-
 @Composable
 private fun HistoryScreen(
     context: Context,
@@ -904,7 +959,7 @@ private fun HistoryScreen(
                         }
                     }
                 },
-                modifier = Modifier.fillMaxWidth().padding(16.dp)
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
             )
         }
     }
@@ -1017,6 +1072,44 @@ private fun HistoryHeader(selectedDate: Long?, onPickDate: () -> Unit, onClearDa
 }
 
 @Composable
+private fun RecordTopTabBar(selectedTab: RecordTabItem, onSelected: (RecordTabItem) -> Unit) {
+    val selectedColor = androidx.compose.ui.graphics.Color(0xFF4F7DF3)
+    val unselectedColor = androidx.compose.ui.graphics.Color(0xFF333333)
+    val tabs = listOf(
+        RecordTabItem.SAVE to "保存",
+        RecordTabItem.HISTORY to "历史记录",
+    )
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            tabs.forEach { (tab, title) ->
+                val isSelected = selectedTab == tab
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { onSelected(tab) },
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = title,
+                        color = if (isSelected) selectedColor else unselectedColor,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .height(3.dp)
+                            .fillMaxWidth(0.18f)
+                            .background(if (isSelected) selectedColor else androidx.compose.ui.graphics.Color.Transparent)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun HistoryActionsRow(pageText: String, onImport: () -> Unit, onOpenExport: () -> Unit) {
     Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1053,7 +1146,7 @@ private fun HistoryPagerBar(page: Int, totalPages: Int, onPageChange: (Int) -> U
     val maxJump = totalPages - 1
     val canGoPrev = page > 0
     val canGoNext = page < maxJump
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Button(
                 onClick = { onPageChange(0) },
@@ -1588,6 +1681,82 @@ private fun saveExercises(context: Context, exercises: List<ExercisePlan>) {
         .edit()
         .putString("exercises", array.toString())
         .apply()
+}
+
+@Composable
+private fun SettingsScreen(
+    modifier: Modifier = Modifier,
+    followSystemTheme: Boolean,
+    darkTheme: Boolean,
+    onFollowSystemThemeChange: (Boolean) -> Unit,
+    onDarkThemeChange: (Boolean) -> Unit,
+) {
+    val context = LocalContext.current
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                val count = if ((context.contentResolver.getType(uri) ?: "").contains("sheet") || uri.toString().endsWith(".xlsx", true) || uri.toString().endsWith(".xls", true)) {
+                    importRecordsFromXlsx(context, uri)
+                } else {
+                    context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { importRecordsFromCsv(context, it.readText()) } ?: 0
+                }
+                Toast.makeText(context, if (count > 0) "已导入 $count 条记录" else "未识别到可导入的记录", Toast.LENGTH_SHORT).show()
+            }.onFailure {
+                Toast.makeText(context, "导入失败：${it.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text("设置", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("开启主题跟随", fontWeight = FontWeight.Medium)
+                        Text("跟随系统明暗模式自动切换", fontSize = 12.sp)
+                    }
+                    androidx.compose.material3.Switch(
+                        checked = followSystemTheme,
+                        onCheckedChange = onFollowSystemThemeChange
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("切换主题", fontWeight = FontWeight.Medium)
+                        Text(if (followSystemTheme) "主题跟随开启时不可手动切换" else "手动切换深色/浅色主题", fontSize = 12.sp)
+                    }
+                    androidx.compose.material3.Switch(
+                        checked = darkTheme,
+                        onCheckedChange = onDarkThemeChange,
+                        enabled = !followSystemTheme
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = { importLauncher.launch(arrayOf("text/*", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel")) },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("导入数据") }
+                    Button(
+                        onClick = {
+                            val allRecords = loadRecords(context)
+                            val now = System.currentTimeMillis()
+                            val fileName = "血压记录_${SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.getDefault()).format(Date(now))}.xlsx"
+                            val file = exportXlsx(allRecords, fileName)
+                            Toast.makeText(context, "已导出到 ${file.absolutePath}", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("导出数据") }
+                }
+            }
+        }
+    }
 }
 
 @Composable
