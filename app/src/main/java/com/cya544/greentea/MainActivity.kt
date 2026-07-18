@@ -5,8 +5,9 @@ import android.animation.AnimatorListenerAdapter
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.app.DatePickerDialog
-import android.app.TimePickerDialog
+import android.app.Dialog
 import android.content.Context
+import android.content.DialogInterface
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -14,9 +15,12 @@ import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Bundle
 import android.os.Environment
-import android.widget.Toast
 import android.view.View
+import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
+import android.widget.LinearLayout
+import android.widget.NumberPicker
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -52,12 +56,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.ui.res.painterResource
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -222,6 +228,42 @@ private fun formatSeconds(totalSeconds: Int): String {
     val minutes = safe / 60
     val seconds = safe % 60
     return if (minutes > 0) "%02d:%02d".format(minutes, seconds) else "00:%02d".format(seconds)
+}
+
+private fun showWheelTimePicker(
+    context: Context,
+    initialHour: Int,
+    initialMinute: Int,
+    onPicked: (Int, Int) -> Unit,
+) {
+    val hourPicker = NumberPicker(context).apply {
+        minValue = 0
+        maxValue = 23
+        value = initialHour
+        wrapSelectorWheel = true
+    }
+    val minutePicker = NumberPicker(context).apply {
+        minValue = 0
+        maxValue = 59
+        value = initialMinute
+        wrapSelectorWheel = true
+        displayedValues = Array(60) { i -> "%02d".format(i) }
+    }
+
+    val content = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        val padding = (context.resources.displayMetrics.density * 16).toInt()
+        setPadding(padding, padding, padding, padding)
+        addView(hourPicker, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        addView(minutePicker, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+    }
+
+    androidx.appcompat.app.AlertDialog.Builder(context)
+        .setTitle("选择时间")
+        .setView(content)
+        .setPositiveButton("确定") { _: DialogInterface, _: Int -> onPicked(hourPicker.value, minutePicker.value) }
+        .setNegativeButton("取消", null)
+        .show()
 }
 
 private fun saveRecords(context: Context, records: List<BloodPressureRecord>) {
@@ -708,13 +750,17 @@ private fun SaveScreen(
                     Button(onClick = {
                         val cal = Calendar.getInstance().apply { timeInMillis = selectedDateTime }
                         DatePickerDialog(context, { _, y, m, d ->
-                            TimePickerDialog(context, { _, hh, mm ->
+                            showWheelTimePicker(
+                                context = context,
+                                initialHour = cal.get(Calendar.HOUR_OF_DAY),
+                                initialMinute = cal.get(Calendar.MINUTE)
+                            ) { hh, mm ->
                                 cal.set(y, m, d, hh, mm, 0)
                                 selectedDateTime = cal.timeInMillis
-                            }, cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE), true).show()
+                            }
                         }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
-                    }, colors = greenButtonColors()) { Text("修改时间") }
-                    Button(onClick = { selectedDateTime = System.currentTimeMillis() }, colors = blueButtonColors()) { Text("更新时间") }
+                    }, colors = greenButtonColors()) { Text("修改时间", fontSize = 13.sp) }
+                    Button(onClick = { selectedDateTime = System.currentTimeMillis() }, colors = blueButtonColors()) { Text("更新时间", fontSize = 13.sp) }
                 }
                 Text("当前时间：${formatDateTime(selectedDateTime)}")
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -724,11 +770,11 @@ private fun SaveScreen(
                         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", imgFile)
                         photoUri = uri
                         photoLauncher.launch(uri)
-                    }, modifier = Modifier.weight(1f), colors = greenButtonColors()) { Text("拍照识别") }
+                    }, modifier = Modifier.weight(1f), colors = greenButtonColors()) { Text("拍照识别", fontSize = 13.sp) }
                     Button(onClick = {
                         galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    }, modifier = Modifier.weight(1f), colors = greenButtonColors()) { Text("图库识别") }
-                    Button(onClick = { saveNewRecord() }, modifier = Modifier.weight(1f), colors = blueButtonColors()) { Text("保存记录") }
+                    }, modifier = Modifier.weight(1f), colors = greenButtonColors()) { Text("图库识别", fontSize = 13.sp) }
+                    Button(onClick = { saveNewRecord() }, modifier = Modifier.weight(1f), colors = blueButtonColors()) { Text("保存记录", fontSize = 13.sp) }
                 }
             }
         }
@@ -768,10 +814,18 @@ private fun SaveScreen(
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                 items(todayRecords, key = { it.id }) { record ->
-                    Card {
-                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(formatDateTime(record.timestamp), fontWeight = FontWeight.Bold)
-                            Text("高压：${record.systolic}  低压：${record.diastolic}  脉搏：${record.pulse}")
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(formatDateTime(record.timestamp), fontWeight = FontWeight.Bold)
+                                Text("高压：${record.systolic}  低压：${record.diastolic}  脉搏：${record.pulse}")
+                            }
                         }
                     }
                 }
@@ -1015,19 +1069,34 @@ private fun HistoryPagerBar(page: Int, totalPages: Int, onPageChange: (Int) -> U
             Button(
                 onClick = { onPageChange(0) },
                 enabled = canGoPrev,
-                modifier = Modifier.weight(0.85f)
-            ) { Text("<<") }
+                modifier = Modifier.size(48.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.first_page),
+                    contentDescription = "第一页",
+                    modifier = Modifier.size(26.dp)
+                )
+            }
             Button(
                 onClick = { onPageChange((page - 1).coerceAtLeast(0)) },
                 enabled = canGoPrev,
-                modifier = Modifier.weight(0.85f)
-            ) { Text("<") }
+                modifier = Modifier.size(48.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.previous_page),
+                    contentDescription = "上一页",
+                    modifier = Modifier.size(26.dp)
+                )
+            }
             OutlinedTextField(
                 value = jumpInput,
                 onValueChange = onJumpInputChange,
                 modifier = Modifier.weight(1.4f),
-                label = { Text("页码跳转") },
+                label = { Text("页码跳转", fontSize = 13.sp) },
                 singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = {
                     val target = jumpInput.toIntOrNull()?.minus(1) ?: return@KeyboardActions
@@ -1037,13 +1106,27 @@ private fun HistoryPagerBar(page: Int, totalPages: Int, onPageChange: (Int) -> U
             Button(
                 onClick = { onPageChange((page + 1).coerceAtMost(maxJump)) },
                 enabled = canGoNext,
-                modifier = Modifier.weight(0.85f)
-            ) { Text(">") }
+                modifier = Modifier.size(48.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.next_page),
+                    contentDescription = "下一页",
+                    modifier = Modifier.size(26.dp)
+                )
+            }
             Button(
                 onClick = { onPageChange(maxJump) },
                 enabled = canGoNext,
-                modifier = Modifier.weight(0.85f)
-            ) { Text(">>") }
+                modifier = Modifier.size(48.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.last_page),
+                    contentDescription = "最后一页",
+                    modifier = Modifier.size(26.dp)
+                )
+            }
         }
     }
 }
@@ -1363,15 +1446,44 @@ private fun TodoScreen(modifier: Modifier = Modifier) {
                     LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(selectedTodos, key = { it.id }) { todo ->
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                androidx.compose.material3.Checkbox(
-                                    checked = todo.done,
-                                    onCheckedChange = { checked ->
-                                        val updated = todos.map { if (it.id == todo.id) it.copy(done = checked) else it }
-                                        saveTodos(context, updated)
-                                        refresh()
-                                    }
+                                Box(
+                                    modifier = Modifier
+                                        .size(22.dp)
+                                        .background(
+                                            color = if (todo.done) androidx.compose.ui.graphics.Color(0xFF2FA66B) else androidx.compose.ui.graphics.Color.Transparent,
+                                            shape = RoundedCornerShape(999.dp)
+                                        )
+                                        .border(
+                                            width = 1.5.dp,
+                                            color = if (todo.done) androidx.compose.ui.graphics.Color(0xFF2FA66B) else androidx.compose.ui.graphics.Color(0xFF9AA0A6),
+                                            shape = RoundedCornerShape(999.dp)
+                                        )
+                                        .padding(2.dp)
+                                ) {
+                                    androidx.compose.material3.IconButton(
+                                        onClick = {
+                                            val updated = todos.map { if (it.id == todo.id) it.copy(done = !todo.done) else it }
+                                            saveTodos(context, updated)
+                                            refresh()
+                                        },
+                                        modifier = Modifier.fillMaxSize(),
+                                        content = {
+                                            if (todo.done) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = "已完成",
+                                                    tint = androidx.compose.ui.graphics.Color.White,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            }
+                                        }
+                                    )
+                                }
+                                Text(
+                                    todo.title,
+                                    modifier = Modifier.padding(start = 8.dp),
+                                    textDecoration = if (todo.done) androidx.compose.ui.text.style.TextDecoration.LineThrough else androidx.compose.ui.text.style.TextDecoration.None
                                 )
-                                Text(todo.title, modifier = Modifier.padding(start = 8.dp))
                             }
                         }
                     }
@@ -1381,9 +1493,13 @@ private fun TodoScreen(modifier: Modifier = Modifier) {
 
         Button(
             onClick = { addDialogVisible = true },
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = 96.dp),
-            shape = RoundedCornerShape(999.dp)
-        ) { Text("＋") }
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 24.dp, bottom = 96.dp)
+                .size(56.dp),
+            shape = RoundedCornerShape(50),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+        ) { Text("＋", fontSize = 24.sp) }
     }
 
     if (addDialogVisible) {
@@ -1550,10 +1666,14 @@ private fun ExerciseScreen(modifier: Modifier = Modifier) {
 
             Button(
                 onClick = { addDialogVisible = true },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 24.dp, bottom = 96.dp),
-                shape = RoundedCornerShape(999.dp),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 24.dp, bottom = 96.dp)
+                    .size(56.dp),
+                shape = RoundedCornerShape(50),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color(0xFF2FA66B), contentColor = androidx.compose.ui.graphics.Color.White)
-            ) { Text("＋") }
+            ) { Text("＋", fontSize = 24.sp) }
         } else {
             ExerciseRunScreen(
                 exercise = activeExercise!!,
