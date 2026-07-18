@@ -353,6 +353,156 @@ private fun exportXlsx(records: List<BloodPressureRecord>, fileName: String): Fi
     return file
 }
 
+private fun exportAllData(context: Context, fileName: String = "GreenTea_全部数据备份.json"): File {
+    val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+    if (!downloads.exists()) downloads.mkdirs()
+    val safeName = sanitizeFileName(fileName).removeSuffix(".json") + ".json"
+    val file = File(downloads, safeName)
+    val (followSystemTheme, darkTheme) = loadThemeSettings(context)
+
+    val backup = JSONObject().apply {
+        put("format", "GreenTeaBackup")
+        put("version", 1)
+        put("exportedAt", System.currentTimeMillis())
+        put("bloodPressureRecords", JSONArray().apply {
+            loadRecords(context).forEach { record ->
+                put(JSONObject().apply {
+                    put("id", record.id)
+                    put("systolic", record.systolic)
+                    put("diastolic", record.diastolic)
+                    put("pulse", record.pulse)
+                    put("timestamp", record.timestamp)
+                })
+            }
+        })
+        put("todos", JSONArray().apply {
+            loadTodos(context).forEach { todo ->
+                put(JSONObject().apply {
+                    put("id", todo.id)
+                    put("dateKey", todo.dateKey)
+                    put("title", todo.title)
+                    put("done", todo.done)
+                })
+            }
+        })
+        put("exercises", JSONArray().apply {
+            loadExercises(context).forEach { exercise ->
+                put(JSONObject().apply {
+                    put("id", exercise.id)
+                    put("name", exercise.name)
+                    put("steps", JSONArray().apply {
+                        exercise.steps.forEach { step ->
+                            put(JSONObject().apply {
+                                put("name", step.name)
+                                put("durationSeconds", step.durationSeconds)
+                                put("restSeconds", step.restSeconds)
+                            })
+                        }
+                    })
+                })
+            }
+        })
+        put("settings", JSONObject().apply {
+            put("followSystemTheme", followSystemTheme)
+            put("darkTheme", darkTheme)
+        })
+    }
+
+    FileOutputStream(file).use { it.write(backup.toString(2).toByteArray()) }
+    return file
+}
+
+private fun importAllDataFromBackup(context: Context, jsonContent: String): String {
+    val backup = JSONObject(jsonContent)
+    if (backup.optString("format") != "GreenTeaBackup") {
+        return "不是有效的备份文件"
+    }
+
+    val importedBpRecords = buildList {
+        val array = backup.optJSONArray("bloodPressureRecords") ?: JSONArray()
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            add(
+                BloodPressureRecord(
+                    id = item.optLong("id", System.currentTimeMillis() + i),
+                    systolic = item.optInt("systolic", 0),
+                    diastolic = item.optInt("diastolic", 0),
+                    pulse = item.optInt("pulse", 0),
+                    timestamp = item.optLong("timestamp", System.currentTimeMillis())
+                )
+            )
+        }
+    }
+    val mergedBpRecords = (loadRecords(context) + importedBpRecords)
+        .distinctBy { it.timestamp }
+        .sortedByDescending { it.timestamp }
+    saveRecords(context, mergedBpRecords)
+
+    val importedTodos = buildList {
+        val array = backup.optJSONArray("todos") ?: JSONArray()
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            add(
+                TodoItem(
+                    id = item.optLong("id", System.currentTimeMillis() + i),
+                    dateKey = item.optString("dateKey", formatDateOnly(System.currentTimeMillis())),
+                    title = item.optString("title", "未命名代办"),
+                    done = item.optBoolean("done", false)
+                )
+            )
+        }
+    }
+    val mergedTodos = (loadTodos(context) + importedTodos)
+        .distinctBy { it.title }
+        .sortedByDescending { it.id }
+    saveTodos(context, mergedTodos)
+
+    val importedExercises = buildList {
+        val array = backup.optJSONArray("exercises") ?: JSONArray()
+        for (i in 0 until array.length()) {
+            val item = array.optJSONObject(i) ?: continue
+            val stepsArray = item.optJSONArray("steps") ?: JSONArray()
+            val steps = buildList {
+                for (j in 0 until stepsArray.length()) {
+                    val step = stepsArray.optJSONObject(j) ?: continue
+                    add(
+                        ExerciseStep(
+                            name = step.optString("name", "步骤 ${j + 1}"),
+                            durationSeconds = step.optInt("durationSeconds", 60),
+                            restSeconds = step.optInt("restSeconds", 60)
+                        )
+                    )
+                }
+            }
+            add(
+                ExercisePlan(
+                    id = item.optLong("id", System.currentTimeMillis() + i),
+                    name = item.optString("name", "未命名锻炼"),
+                    steps = steps
+                )
+            )
+        }
+    }
+    val mergedExercises = (loadExercises(context) + importedExercises)
+        .distinctBy { exercise ->
+            val stepsKey = exercise.steps.joinToString("|") { "${it.name}:${it.durationSeconds}:${it.restSeconds}" }
+            "${exercise.name}::$stepsKey"
+        }
+        .sortedByDescending { it.id }
+    saveExercises(context, mergedExercises)
+
+    val settings = backup.optJSONObject("settings")
+    if (settings != null) {
+        saveThemeSettings(
+            context,
+            settings.optBoolean("followSystemTheme", true),
+            settings.optBoolean("darkTheme", false)
+        )
+    }
+
+    return "已恢复备份"
+}
+
 private fun importRecordsFromCsv(context: Context, csvContent: String): Int {
     val existing = loadRecords(context).toMutableList()
     val lines = csvContent.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
@@ -1696,12 +1846,10 @@ private fun SettingsScreen(
         if (uri != null) {
             runCatching {
                 context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                val count = if ((context.contentResolver.getType(uri) ?: "").contains("sheet") || uri.toString().endsWith(".xlsx", true) || uri.toString().endsWith(".xls", true)) {
-                    importRecordsFromXlsx(context, uri)
-                } else {
-                    context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { importRecordsFromCsv(context, it.readText()) } ?: 0
-                }
-                Toast.makeText(context, if (count > 0) "已导入 $count 条记录" else "未识别到可导入的记录", Toast.LENGTH_SHORT).show()
+                val content = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    ?: return@runCatching Toast.makeText(context, "无法读取导入文件", Toast.LENGTH_SHORT).show()
+                val message = importAllDataFromBackup(context, content)
+                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
             }.onFailure {
                 Toast.makeText(context, "导入失败：${it.message}", Toast.LENGTH_SHORT).show()
             }
@@ -1740,15 +1888,14 @@ private fun SettingsScreen(
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                     Button(
-                        onClick = { importLauncher.launch(arrayOf("text/*", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel")) },
+                        onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "*/*")) },
                         modifier = Modifier.weight(1f)
                     ) { Text("导入数据") }
                     Button(
                         onClick = {
-                            val allRecords = loadRecords(context)
                             val now = System.currentTimeMillis()
-                            val fileName = "血压记录_${SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.getDefault()).format(Date(now))}.xlsx"
-                            val file = exportXlsx(allRecords, fileName)
+                            val fileName = "GreenTea_全部数据备份_${SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.getDefault()).format(Date(now))}.json"
+                            val file = exportAllData(context, fileName)
                             Toast.makeText(context, "已导出到 ${file.absolutePath}", Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier.weight(1f)
