@@ -1405,9 +1405,14 @@ private data class TodoItem(
     val done: Boolean = false,
 )
 
+private const val TODO_PREFS = "todo_records"
+private const val KEY_TODOS = "todos"
+private const val KEY_TODO_LAST_UPDATE_DATE = "todo_last_update_date"
+private const val TODO_CARRY_OVER_LOOKBACK_MONTHS = 6L
+
 private fun loadTodos(context: Context): List<TodoItem> {
-    val raw = context.getSharedPreferences("todo_records", Context.MODE_PRIVATE)
-        .getString("todos", "[]") ?: "[]"
+    val raw = context.getSharedPreferences(TODO_PREFS, Context.MODE_PRIVATE)
+        .getString(KEY_TODOS, "[]") ?: "[]"
     return runCatching {
         val array = JSONArray(raw)
         buildList {
@@ -1436,10 +1441,38 @@ private fun saveTodos(context: Context, todos: List<TodoItem>) {
             put("done", todo.done)
         })
     }
-    context.getSharedPreferences("todo_records", Context.MODE_PRIVATE)
+    context.getSharedPreferences(TODO_PREFS, Context.MODE_PRIVATE)
         .edit()
-        .putString("todos", array.toString())
+        .putString(KEY_TODOS, array.toString())
         .apply()
+}
+
+private fun loadTodoLastUpdateDate(context: Context): String? {
+    return context.getSharedPreferences(TODO_PREFS, Context.MODE_PRIVATE)
+        .getString(KEY_TODO_LAST_UPDATE_DATE, null)
+}
+
+private fun saveTodoLastUpdateDate(context: Context, dateKey: String) {
+    context.getSharedPreferences(TODO_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putString(KEY_TODO_LAST_UPDATE_DATE, dateKey)
+        .apply()
+}
+
+private fun parseDateKey(dateKey: String): Long? {
+    return runCatching {
+        SimpleDateFormat("yyyy/MM/dd", Locale.getDefault()).parse(dateKey)?.time
+    }.getOrNull()
+}
+
+private fun dayKeyOffset(baseDateKey: String, offsetDays: Int): String? {
+    val baseTime = parseDateKey(baseDateKey) ?: return null
+    return formatDateOnly(
+        Calendar.getInstance().apply {
+            timeInMillis = baseTime
+            add(Calendar.DAY_OF_MONTH, offsetDays)
+        }.timeInMillis
+    )
 }
 
 private fun monthKey(calendar: Calendar): String = SimpleDateFormat("yyyy-MM", Locale.getDefault()).format(calendar.time)
@@ -1560,37 +1593,70 @@ private fun ExpandedMonthCard(
 @Composable
 private fun TodoScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val todayMillis = remember { System.currentTimeMillis() }
     var todos by remember { mutableStateOf(loadTodos(context)) }
-    var selectedDate by remember { mutableStateOf(todayMillis) }
+    var selectedDate by remember { mutableStateOf(System.currentTimeMillis()) }
     var currentMonth by remember { mutableStateOf(Calendar.getInstance()) }
     var addDialogVisible by remember { mutableStateOf(false) }
     var addTitle by remember { mutableStateOf("") }
     var addDateChoice by remember { mutableStateOf(0) }
     var calendarExpanded by remember { mutableStateOf(true) }
 
-    fun refresh() { todos = loadTodos(context) }
-    fun setToday() {
-        selectedDate = todayMillis
-        currentMonth = Calendar.getInstance()
+    fun refresh() {
+        todos = loadTodos(context)
     }
-    fun carryOverUnfinishedFromYesterday() {
-        val today = formatDateOnly(System.currentTimeMillis())
-        val yesterday = formatDateOnly(System.currentTimeMillis() - 24L * 60 * 60 * 1000)
-        val pending = todos.filter { it.dateKey == yesterday && !it.done }
-        if (pending.isNotEmpty()) {
-            val updated = todos.filterNot { it.dateKey == yesterday && !it.done } + pending.map {
-                it.copy(id = System.currentTimeMillis() + it.id, dateKey = today, done = false)
-            }
-            saveTodos(context, updated)
-            todos = updated
+
+    fun moveUnfinishedTodosToToday(fromDateKey: String, toDateKey: String = formatDateOnly(System.currentTimeMillis())) {
+        val pending = todos.filter { it.dateKey == fromDateKey && !it.done }
+        if (pending.isEmpty()) return
+
+        val updated = todos.filterNot { it.dateKey == fromDateKey && !it.done } + pending.mapIndexed { index, todo ->
+            todo.copy(
+                id = System.currentTimeMillis() + todo.id + index,
+                dateKey = toDateKey,
+                done = false
+            )
         }
+        todos = updated.sortedByDescending { it.id }
+        saveTodos(context, todos)
+    }
+
+    fun carryForwardTodos() {
+        val todayKey = formatDateOnly(System.currentTimeMillis())
+        val lastUpdateDate = loadTodoLastUpdateDate(context)
+
+        if (lastUpdateDate == todayKey) return
+
+        val startTime = if (lastUpdateDate.isNullOrBlank()) {
+            Calendar.getInstance().apply {
+                timeInMillis = System.currentTimeMillis()
+                add(Calendar.MONTH, -TODO_CARRY_OVER_LOOKBACK_MONTHS.toInt())
+                set(Calendar.DAY_OF_MONTH, 1)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+        } else {
+            parseDateKey(lastUpdateDate) ?: return
+        }
+        val todayTime = parseDateKey(todayKey) ?: return
+        val calendar = Calendar.getInstance().apply { timeInMillis = startTime }
+
+        while (calendar.timeInMillis <= todayTime) {
+            val dateKey = formatDateOnly(calendar.timeInMillis)
+            if (dateKey != todayKey) {
+                moveUnfinishedTodosToToday(dateKey, todayKey)
+            }
+            calendar.add(Calendar.DAY_OF_MONTH, 1)
+        }
+
+        saveTodoLastUpdateDate(context, todayKey)
+        refresh()
     }
 
     LaunchedEffect(Unit) {
-        setToday()
         refresh()
-        carryOverUnfinishedFromYesterday()
+        carryForwardTodos()
         refresh()
     }
 
